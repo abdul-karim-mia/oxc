@@ -6,6 +6,7 @@ use oxc_allocator::{ArenaBox, ArenaVec};
 use oxc_ast::ast::{BindingRestElement, RegExpFlags};
 use oxc_span::{GetSpan, Span};
 use oxc_str::JSStr;
+use oxc_syntax::node::GetNodeId;
 
 use crate::{
     Context, ParserConfig as Config, ParserImpl,
@@ -460,7 +461,7 @@ impl<'a, C: Config> ParserImpl<'a, C> {
         list
     }
 
-    pub(crate) fn parse_delimited_list<F, T>(
+    pub(crate) fn parse_delimited_list<F, T: GetSpan + GetNodeId>(
         &mut self,
         close: Kind,
         separator: Kind,
@@ -474,7 +475,7 @@ impl<'a, C: Config> ParserImpl<'a, C> {
     }
 
     /// Include an already parsed prefix without consuming a separator for it.
-    pub(crate) fn parse_delimited_list_with_prefix<F, T>(
+    pub(crate) fn parse_delimited_list_with_prefix<F, T: GetSpan + GetNodeId>(
         &mut self,
         mut first: Option<T>,
         close: Kind,
@@ -496,7 +497,7 @@ impl<'a, C: Config> ParserImpl<'a, C> {
             }
             let element = parse_element(p);
             if let ControlFlow::Break(trailing) =
-                p.parse_delimited_list_separator(close, separator, opening_span)
+                p.parse_delimited_list_separator(&element, close, separator, opening_span)
             {
                 trailing_separator = trailing;
                 finished = true;
@@ -507,8 +508,9 @@ impl<'a, C: Config> ParserImpl<'a, C> {
     }
 
     #[inline]
-    fn parse_delimited_list_separator(
+    fn parse_delimited_list_separator<T: GetSpan + GetNodeId>(
         &mut self,
+        element: &T,
         close: Kind,
         separator: Kind,
         opening_span: Span,
@@ -528,6 +530,9 @@ impl<'a, C: Config> ParserImpl<'a, C> {
             return ControlFlow::Break(None);
         }
         self.advance(separator);
+        if self.cur_token().follows_comment() {
+            self.attach_comments_after_separator(element);
+        }
         let kind = self.cur_kind();
         if kind == close {
             let trailing_separator = self.prev_token_end - 1;
