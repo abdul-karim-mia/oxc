@@ -4,7 +4,10 @@ use oxc_ast_visit::VisitJs;
 use oxc_ecmascript::BoundNames;
 use oxc_span::{SPAN, Span};
 use oxc_str::Ident;
-use oxc_syntax::symbol::SymbolId;
+use oxc_syntax::{
+    node::NodeId,
+    symbol::{SymbolFlags, SymbolId},
+};
 
 pub struct KeepVar<'a> {
     vars: Vec<(Ident<'a>, Span, Option<SymbolId>)>,
@@ -78,7 +81,8 @@ impl<'a> KeepVar<'a> {
         let kind = VariableDeclarationKind::Var;
         let mut decls = ArenaVec::with_capacity_in(self.vars.len(), ctx.builder());
         for &(name, span, symbol_id) in &self.vars {
-            let symbol_id = symbol_id.map(|symbol_id| self.declared_symbol(name, symbol_id, ctx));
+            let symbol_id =
+                symbol_id.map(|symbol_id| self.declared_symbol(name, span, symbol_id, ctx));
             let builder = ctx.builder();
             let id = symbol_id.map_or_else(
                 || BindingPattern::new_binding_identifier(span, name, builder),
@@ -101,6 +105,7 @@ impl<'a> KeepVar<'a> {
     fn declared_symbol(
         &self,
         name: Ident<'a>,
+        span: Span,
         symbol_id: SymbolId,
         ctx: &mut crate::TraverseCtx<'a>,
     ) -> SymbolId {
@@ -123,9 +128,17 @@ impl<'a> KeepVar<'a> {
         }
         match enclosing_catch {
             Some(catch) if !scoping.symbol_is_unused(catch) => {
-                if catch != symbol_id {
-                    ctx.scoping_mut().add_catch_var_binding(catch, var_binding);
+                // The regenerated `var` redeclares the surviving catch parameter, which links
+                // that catch to `var_binding` (see `Scoping::catch_var_binding`).
+                if scoping.catch_var_binding(catch).is_none() {
+                    ctx.scoping_mut().add_symbol_redeclaration(
+                        catch,
+                        SymbolFlags::FunctionScopedVariable,
+                        NodeId::DUMMY,
+                        span,
+                    );
                 }
+                debug_assert_eq!(ctx.scoping().catch_var_binding(catch), Some(var_binding));
                 catch
             }
             _ => var_binding,

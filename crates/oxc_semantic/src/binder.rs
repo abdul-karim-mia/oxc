@@ -119,8 +119,9 @@ impl<'a> Binder<'a> for VariableDeclarator<'a> {
                     builder.declare_symbol_on_scope(span, name, target_scope_id, includes, excludes)
                 });
                 if let Some(catch_symbol_id) = catch_symbol_id {
+                    // This redeclaration links the catch to `symbol_id`; see
+                    // `Scoping::catch_var_binding`.
                     builder.add_redeclare_variable(catch_symbol_id, includes, span);
-                    builder.scoping.add_catch_var_binding(catch_symbol_id, symbol_id);
                     ident.symbol_id.set(Some(catch_symbol_id));
                 } else {
                     ident.symbol_id.set(Some(symbol_id));

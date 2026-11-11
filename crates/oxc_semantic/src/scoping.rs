@@ -20,6 +20,10 @@ use crate::multi_index_vec::multi_index_vec;
 pub type Bindings<'a> = ArenaIdentHashMap<'a, SymbolId>;
 pub type UnresolvedReferences<'a> = ArenaIdentHashMap<'a, ArenaVec<'a, ReferenceId>>;
 
+/// One declaration of a symbol that is declared more than once.
+///
+/// A `var` redeclaring a catch parameter also links that parameter to the separate
+/// enclosing var binding; see [`Scoping::catch_var_binding`].
 #[derive(Clone, Debug)]
 pub struct Redeclaration {
     pub span: Span,
@@ -101,10 +105,6 @@ pub struct Scoping {
     /// Function or Variable Symbol IDs that are marked with `@__NO_SIDE_EFFECTS__`.
     pub(crate) no_side_effects: FxHashSet<SymbolId>,
 
-    /// Simple catch parameters redeclared by `var`, mapped to the enclosing var binding.
-    /// The bindings have separate values, but the declarator must retain both bindings' name.
-    pub(crate) catch_var_bindings: FxHashMap<SymbolId, SymbolId>,
-
     /// Pre-computed enum member values and scope mappings.
     pub(crate) enum_data: EnumData,
 
@@ -126,7 +126,6 @@ impl Default for Scoping {
             symbol_table: SymbolTable::new(),
             references: IndexVec::new(),
             no_side_effects: FxHashSet::default(),
-            catch_var_bindings: FxHashMap::default(),
             enum_data: EnumData::default(),
             scope_table: ScopeTable::new(),
             cell: ScopingCell::new(Allocator::default(), |allocator| ScopingInner {
@@ -293,6 +292,8 @@ pub struct ScopingInner<'cell> {
     /// Once a symbol is redeclared, there are at least two entries here. The first
     /// entry is the original symbol information, and the rest are redeclarations.
     /// i.e. `symbol_redeclarations[symbol_id].len() >= 2` always.
+    ///
+    /// This also encodes catch/var links: see [`Scoping::catch_var_binding`].
     symbol_redeclarations: FxHashMap<SymbolId, ArenaVec<'cell, Redeclaration>>,
     /* Scope Tree Fields */
     /// Symbol bindings in a scope.
@@ -434,20 +435,50 @@ impl Scoping {
     }
 
     /// Get the enclosing var binding declared by a `var` that redeclares this catch parameter.
-    /// The declarator carries the catch symbol because its initializer assigns to that binding.
+    ///
+    /// In `catch (e) { var e = 1 }`, the `var` declares a binding in the enclosing var scope,
+    /// but its initializer assigns to the catch parameter, so the declarator's identifier
+    /// carries the catch symbol. See <https://tc39.es/ecma262/#sec-variablestatements-in-catch-blocks>.
+    ///
+    /// The link is derived rather than stored: the catch parameter has a `var` redeclaration,
+    /// and the enclosing binding has the same name in the nearest var scope. Both symbols
+    /// print through one identifier, so they must be renamed together
+    /// (see [`Scoping::symbol_ids_with_shared_name`]).
     #[inline]
     pub fn catch_var_binding(&self, symbol_id: SymbolId) -> Option<SymbolId> {
-        self.catch_var_bindings.get(&symbol_id).copied()
-    }
-
-    /// Record that a `var` in this catch parameter's body also declares `var_binding`.
-    pub fn add_catch_var_binding(&mut self, catch_symbol_id: SymbolId, var_binding: SymbolId) {
-        self.catch_var_bindings.insert(catch_symbol_id, var_binding);
+        if !self.symbol_flags(symbol_id).is_catch_variable() {
+            return None;
+        }
+        self.catch_var_binding_of(symbol_id, self.symbol_redeclarations(symbol_id))
     }
 
     /// Iterate `(catch parameter, enclosing var binding)` pairs in unspecified order.
+    /// See [`Scoping::catch_var_binding`].
     pub fn catch_var_bindings(&self) -> impl Iterator<Item = (SymbolId, SymbolId)> + '_ {
-        self.catch_var_bindings.iter().map(|(&catch, &outer)| (catch, outer))
+        self.iter_symbol_redeclarations().filter_map(|(symbol_id, declarations)| {
+            if !self.symbol_flags(symbol_id).is_catch_variable() {
+                return None;
+            }
+            Some((symbol_id, self.catch_var_binding_of(symbol_id, declarations)?))
+        })
+    }
+
+    fn catch_var_binding_of(
+        &self,
+        symbol_id: SymbolId,
+        declarations: &[Redeclaration],
+    ) -> Option<SymbolId> {
+        // A simple catch parameter is function-scoped too, so exclude its own declaration.
+        if !declarations.iter().any(|declaration| {
+            declaration.flags.contains(SymbolFlags::FunctionScopedVariable)
+                && !declaration.flags.is_catch_variable()
+        }) {
+            return None;
+        }
+        let var_scope_id = self
+            .scope_ancestors(self.symbol_scope_id(symbol_id))
+            .find(|&scope_id| self.scope_flags(scope_id).is_var())?;
+        self.get_binding(var_scope_id, self.symbol_ident(symbol_id))
     }
 
     /// Iterate all symbols that must be renamed together with `symbol_id`.
@@ -1188,7 +1219,6 @@ impl Scoping {
             symbol_table: self.symbol_table.clone(),
             references: self.references.clone(),
             no_side_effects: self.no_side_effects.clone(),
-            catch_var_bindings: self.catch_var_bindings.clone(),
             enum_data: self.enum_data.clone(),
             scope_table: self.scope_table.clone(),
             cell: {
