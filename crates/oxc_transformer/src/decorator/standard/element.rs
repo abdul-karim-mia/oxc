@@ -249,7 +249,12 @@ impl<'a> StandardDecoratorState<'a> {
             SymbolFlags::BlockScopedVariable,
         );
         ctx.state.var_declarations.insert_let(&init, None, &ctx.ast);
-        ClassDecoratorState { init, instance_method_extras, static_method_extras }
+        ClassDecoratorState {
+            init,
+            instance_method_extras,
+            static_method_extras,
+            original_class: None,
+        }
     }
 
     /// Capture a decorated instance field's key before it is moved into the constructor.
