@@ -17,14 +17,13 @@ use oxc_cfg::{
     },
 };
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_ecmascript::BoundNames;
 use oxc_index::IndexVec;
 use oxc_macros::declare_oxc_lint;
 use oxc_semantic::{NodeId, Reference, ScopeId, SymbolId};
 use oxc_span::GetSpan;
 use oxc_span::Span;
 
-use crate::{context::LintContext, rule::Rule};
+use crate::{context::LintContext, rule::Rule, utils::declarator_initializes};
 
 fn no_useless_assignment_diagnostic(span: Span) -> OxcDiagnostic {
     OxcDiagnostic::warn("This assigned value is not used in subsequent statements.")
@@ -157,7 +156,6 @@ impl Rule for NoUselessAssignment {
         let mut cfg_ops: CfgOps = IndexVec::with_capacity(num_blocks);
         cfg_ops.resize_with(num_blocks, Vec::new);
         let mut tracked_symbols: Vec<TrackedSymbol> = Vec::new();
-        let has_linked_bindings = ctx.scoping().catch_var_bindings().next().is_some();
 
         for symbol_id in ctx.scoping().symbol_ids() {
             let decl_node = ctx.symbol_declaration(symbol_id);
@@ -197,21 +195,10 @@ impl Rule for NoUselessAssignment {
             });
 
             // Collect ops for this symbol (formerly Pass 2)
+            // In `catch (e) { var e = 1 }`, the initializer writes the catch parameter,
+            // not the enclosing binding declared by the `var`.
             if var_decl.is_some_and(|var_decl| {
-                if var_decl.init.is_none() {
-                    return false;
-                }
-                if !has_linked_bindings {
-                    return true;
-                }
-                // A hoisted var binding can be declared by an identifier attached
-                // to a catch parameter. Its initializer writes to the catch,
-                // not to the hoisted symbol being analyzed here.
-                let mut writes_symbol = false;
-                var_decl.id.bound_names(&mut |ident| {
-                    writes_symbol |= ident.symbol_id() == symbol_id;
-                });
-                writes_symbol
+                var_decl.init.is_some() && declarator_initializes(var_decl, symbol_id)
             }) {
                 Self::push_op(
                     ctx,

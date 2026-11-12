@@ -16,7 +16,6 @@ use ignored::IgnoreReason;
 use options::{IgnorePattern, NoUnusedVarsFixMode, NoUnusedVarsOptions};
 use oxc_ast::{AstKind, AstType, ast::CatchParameter};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_ecmascript::BoundNames;
 use oxc_macros::declare_oxc_lint;
 use oxc_semantic::{AstNode, ScopeFlags, SymbolFlags};
 use oxc_span::{GetSpan, Span};
@@ -27,6 +26,7 @@ use crate::{
     context::{ContextHost, LintContext},
     rule::Rule,
     rules::eslint::no_unused_vars::options::VarsOption,
+    utils::declarator_initializes,
 };
 
 #[derive(JsonSchema, Debug)]
@@ -320,14 +320,9 @@ impl NoUnusedVars {
                 };
 
                 Self::report_with_fix_mode(self.fix.variables, ctx, report, |fixer| {
-                    // This declaration can also initialize a separate catch binding.
-                    // Removing or renaming it would change that binding's value.
-                    let mut declares_catch = false;
-                    decl.id.bound_names(&mut |id| {
-                        declares_catch |=
-                            ctx.scoping().catch_var_binding(id.symbol_id()) == Some(symbol.id());
-                    });
-                    if declares_catch {
+                    // In `catch (e) { var e = 1 }`, the declarator initializes the catch
+                    // parameter. Removing or renaming it would change that binding's value.
+                    if !declarator_initializes(decl, symbol.id()) {
                         return fixer.noop();
                     }
                     // NOTE: suggestions produced by this fixer are all flagged

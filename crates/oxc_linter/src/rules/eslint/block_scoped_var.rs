@@ -1,4 +1,4 @@
-use crate::{AstNode, context::LintContext, rule::Rule};
+use crate::{AstNode, context::LintContext, rule::Rule, utils::declarator_initializes};
 use oxc_ast::{AstKind, ast::BindingPattern};
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_ecmascript::BoundNames;
@@ -206,11 +206,7 @@ fn redeclaration_has_write(
         AstKind::VariableDeclarator(decl) => {
             // An initializer in another catch writes to its catch parameter,
             // even though the declaration also contributes to this hoisted var.
-            let mut writes_symbol = false;
-            decl.id.bound_names(&mut |ident| {
-                writes_symbol |= ident.span == span && ident.symbol_id() == symbol_id;
-            });
-            return writes_symbol
+            return declarator_initializes(decl, symbol_id)
                 && (decl.init.is_some()
                     || matches!(
                         ctx.nodes().parent_kind(ctx.nodes().parent_id(node.id())),
