@@ -637,12 +637,13 @@ impl<'a> SlotAssignment<'a> {
         let mut reusable_slots = ArenaVec::new_in(&allocator);
         // Pre-computed BitSet for ancestor membership tests - reused across iterations
         let mut ancestor_set = BitSet::new_in(scoping.scopes_len(), allocator);
-        // `(enclosing var binding, catch parameter)` pairs, sorted to look up by binding.
-        let mut catch_var_bindings = ArenaVec::new_in(&allocator);
+        // Catch parameters redeclared by `var`, keyed by the enclosing binding whose name they
+        // print with (see the end).
+        let mut linked_catches = FxHashMap::<SymbolId, Vec<SymbolId>>::default();
         if HAS_LINKED_BINDINGS {
-            catch_var_bindings
-                .extend(scoping.catch_var_bindings().map(|(catch, outer)| (outer, catch)));
-            catch_var_bindings.sort_unstable();
+            for (catch, outer) in scoping.catch_var_bindings() {
+                linked_catches.entry(outer).or_default().push(catch);
+            }
         }
 
         // Walk down the scope tree and assign a slot number for each symbol. Doing it as a scope
@@ -759,14 +760,9 @@ impl<'a> SlotAssignment<'a> {
                     }
                 };
                 mark_symbol_live(symbol_id);
-                if HAS_LINKED_BINDINGS {
-                    // Linked catch declarations print this binding's name too.
-                    for &(outer, catch) in &catch_var_bindings
-                        [catch_var_bindings.partition_point(|&(outer, _)| outer < symbol_id)..]
-                    {
-                        if outer != symbol_id {
-                            break;
-                        }
+                // Linked catch parameters print this binding's name too.
+                if HAS_LINKED_BINDINGS && let Some(catches) = linked_catches.get(&symbol_id) {
+                    for &catch in catches {
                         mark_symbol_live(catch);
                     }
                 }
@@ -794,8 +790,10 @@ impl<'a> SlotAssignment<'a> {
 
         // The printed `var` must declare the enclosing binding's name as well as assign
         // to the catch parameter. Unassigned outer slots preserve both original names.
-        for (outer, catch) in catch_var_bindings {
-            slots[catch.index()] = slots[outer.index()];
+        for (outer, catches) in linked_catches {
+            for catch in catches {
+                slots[catch.index()] = slots[outer.index()];
+            }
         }
 
         let total_slots = slot_liveness.len();
