@@ -747,13 +747,16 @@ fn lower_inner<'a>(
         promote_temporary(&mut builder, place.identifier);
         hir_params.push(ParamPattern::Place(Place { span: None, ..place }));
         let value = if let Some(initializer) = &param.initializer {
-            if matches!(
-                &**initializer,
-                oxc::Expression::JSXElement(_) | oxc::Expression::JSXFragment(_)
-            ) {
+            if builder.environment().output_mode != OutputMode::Lint
+                && matches!(
+                    &**initializer,
+                    oxc::Expression::JSXElement(_) | oxc::Expression::JSXFragment(_)
+                )
+            {
                 // Unlike the TS implementation, retain JSX defaults in their
                 // parameter environment. Moving them into the body can change
                 // which binding a tag resolves to (including fbt/fbs imports).
+                // Lint still lowers the default and validates the function.
                 builder.environment_mut().skip_compilation = true;
                 place
             } else {

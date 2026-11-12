@@ -132,14 +132,16 @@ fn run_fixture(source: &str) -> String {
         .collect::<Vec<_>>();
     let lint_body = diagnostics_body(&lint_diagnostics);
     // A fatal compile may originate from codegen, which lint intentionally does not
-    // run, and may replace diagnostics accumulated by earlier passes. Successful
-    // compilation still has to agree with lint on diagnostics and fatality.
+    // run, and may replace diagnostics accumulated by earlier passes. A rewrite
+    // bailout can preserve the source while lint continues to report errors;
+    // under all_errors, those additional lint diagnostics can also be fatal.
     if !fatal && lint_body != transform_body {
         out.push_str("\n\nLint-mode diagnostics (differ from transform):\n\n");
         out.push_str(if lint_body.is_empty() { "(none)\n" } else { &lint_body });
     }
-    if !fatal {
-        assert_eq!(lint_result.fatal, fatal, "lint and compile fatality diverged");
+    if !fatal && lint_result.fatal {
+        assert_ne!(lint_body, transform_body, "fatality differs without additional diagnostics");
+        out.push_str("\nLint mode is fatal.\n");
     }
     out
 }

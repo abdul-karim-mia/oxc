@@ -128,7 +128,8 @@ pub fn compile_fn<'a, const EMIT: bool>(
 
     // Lowering flags syntax whose semantics are not yet preserved by a rewrite.
     // Keep the source without a diagnostic so other functions still compile.
-    if env.skip_compilation {
+    // A rewrite bailout must not suppress read-only lint validation.
+    if env.skip_compilation && env.output_mode != OutputMode::Lint {
         return Ok(None);
     }
 
