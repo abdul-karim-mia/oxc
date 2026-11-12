@@ -6,13 +6,12 @@ use oxc_span::{SPAN, Span};
 use oxc_str::Ident;
 use oxc_syntax::{
     node::NodeId,
+    scope::ScopeId,
     symbol::{SymbolFlags, SymbolId},
 };
 
 pub struct KeepVar<'a> {
     vars: Vec<(Ident<'a>, Span, Option<SymbolId>)>,
-    /// Simple catch parameters whose catch clauses are inside the visited statement.
-    removed_catch_params: Vec<SymbolId>,
 }
 
 impl<'a> VisitJs<'a> for KeepVar<'a> {
@@ -46,16 +45,6 @@ impl<'a> VisitJs<'a> for KeepVar<'a> {
         }
     }
 
-    fn visit_catch_clause(&mut self, it: &CatchClause<'a>) {
-        if let Some(param) = &it.param
-            && let BindingPattern::BindingIdentifier(id) = &param.pattern
-            && let Some(symbol_id) = id.symbol_id.get()
-        {
-            self.removed_catch_params.push(symbol_id);
-        }
-        self.visit_block_statement(&it.body);
-    }
-
     fn visit_variable_declaration(&mut self, it: &VariableDeclaration<'a>) {
         if it.kind.is_var() {
             it.bound_names(&mut |ident| {
@@ -67,11 +56,22 @@ impl<'a> VisitJs<'a> for KeepVar<'a> {
 
 impl<'a> KeepVar<'a> {
     pub fn new() -> Self {
-        Self { vars: std::vec![], removed_catch_params: std::vec![] }
+        Self { vars: std::vec![] }
     }
 
+    /// Declare the collected `var`s in the current scope.
     pub fn get_variable_declaration(
         self,
+        ctx: &mut crate::TraverseCtx<'a>,
+    ) -> Option<ArenaBox<'a, VariableDeclaration<'a>>> {
+        let scope_id = ctx.current_scope_id();
+        self.get_variable_declaration_in(scope_id, ctx)
+    }
+
+    /// Declare the collected `var`s in `scope_id`, where the declaration will be placed.
+    pub fn get_variable_declaration_in(
+        self,
+        scope_id: ScopeId,
         ctx: &mut crate::TraverseCtx<'a>,
     ) -> Option<ArenaBox<'a, VariableDeclaration<'a>>> {
         if self.vars.is_empty() {
@@ -81,8 +81,8 @@ impl<'a> KeepVar<'a> {
         let kind = VariableDeclarationKind::Var;
         let mut decls = ArenaVec::with_capacity_in(self.vars.len(), ctx.builder());
         for &(name, span, symbol_id) in &self.vars {
-            let symbol_id =
-                symbol_id.map(|symbol_id| self.declared_symbol(name, span, symbol_id, ctx));
+            let symbol_id = symbol_id
+                .map(|symbol_id| Self::declared_symbol(name, span, symbol_id, scope_id, ctx));
             let builder = ctx.builder();
             let id = symbol_id.map_or_else(
                 || BindingPattern::new_binding_identifier(span, name, builder),
@@ -98,36 +98,25 @@ impl<'a> KeepVar<'a> {
         Some(VariableDeclaration::boxed(SPAN, kind, decls, false, ctx.builder()))
     }
 
-    /// The symbol for a regenerated `var` identifier at the replacement site.
-    /// Keep the nearest surviving catch parameter when later code can access it, including
-    /// when an inner catch was removed. Unreferenced catch parameters can be removed too;
-    /// in that case, only the enclosing var binding needs to be preserved.
+    /// The symbol for a regenerated `var` identifier placed in `scope_id`: the binding semantic
+    /// analysis would give it there, so the output minifies to a fixed point. A `var` that
+    /// redeclared a catch parameter now redeclares whichever catch parameter it resolves to,
+    /// or else only declares the enclosing var binding. An unreferenced catch parameter can
+    /// be removed later, so it is not linked.
     fn declared_symbol(
-        &self,
         name: Ident<'a>,
         span: Span,
         symbol_id: SymbolId,
+        scope_id: ScopeId,
         ctx: &mut crate::TraverseCtx<'a>,
     ) -> SymbolId {
         let scoping = ctx.scoping();
         let Some(var_binding) = scoping.catch_var_binding(symbol_id) else { return symbol_id };
-        let var_scope_id = scoping.symbol_scope_id(var_binding);
-        let mut scope_id = Some(scoping.symbol_scope_id(symbol_id));
-        let mut enclosing_catch = None;
-        while let Some(id) = scope_id
-            && id != var_scope_id
-        {
-            if let Some(binding) = scoping.get_binding(id, name)
-                && scoping.symbol_flags(binding).is_catch_variable()
-                && !self.removed_catch_params.contains(&binding)
+        match scoping.find_binding(scope_id, name) {
+            Some(catch)
+                if scoping.symbol_flags(catch).is_catch_variable()
+                    && !scoping.symbol_is_unused(catch) =>
             {
-                enclosing_catch = Some(binding);
-                break;
-            }
-            scope_id = scoping.scope_parent_id(id);
-        }
-        match enclosing_catch {
-            Some(catch) if !scoping.symbol_is_unused(catch) => {
                 // The regenerated `var` redeclares the surviving catch parameter, which links
                 // that catch to `var_binding` (see `Scoping::catch_var_binding`).
                 if scoping.catch_var_binding(catch).is_none() {
@@ -150,5 +139,13 @@ impl<'a> KeepVar<'a> {
         ctx: &mut crate::TraverseCtx<'a>,
     ) -> Option<Statement<'a>> {
         self.get_variable_declaration(ctx).map(Statement::VariableDeclaration)
+    }
+
+    pub fn get_variable_declaration_statement_in(
+        self,
+        scope_id: ScopeId,
+        ctx: &mut crate::TraverseCtx<'a>,
+    ) -> Option<Statement<'a>> {
+        self.get_variable_declaration_in(scope_id, ctx).map(Statement::VariableDeclaration)
     }
 }

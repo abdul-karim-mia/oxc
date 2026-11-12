@@ -436,7 +436,10 @@ impl<'a> PeepholeOptimizations {
                 for dropped in handler.body.body.take_in(ctx) {
                     ctx.drop_statement(&dropped);
                 }
-                if let Some(var_decl) = var.get_variable_declaration_statement(ctx) {
+                // The declaration stays inside the catch body.
+                if let Some(var_decl) =
+                    var.get_variable_declaration_statement_in(handler.body.scope_id(), ctx)
+                {
                     handler.body.body.push(var_decl);
                 }
             }
