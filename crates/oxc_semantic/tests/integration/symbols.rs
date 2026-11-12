@@ -26,6 +26,35 @@ fn test_linked_symbol_names_survive_clone() {
     }
 }
 
+#[test]
+fn test_rename_symbol_with_shared_name() {
+    let tester =
+        SemanticTester::js("let other; try {} catch (e) { var e; } try {} catch (e) { var e; }");
+    let mut scoping = tester.build().into_scoping();
+    let pairs = scoping.catch_var_bindings().collect::<Vec<_>>();
+    assert_eq!(pairs.len(), 2);
+    let outer = pairs[0].1;
+    let mut expected = vec![outer, pairs[0].0, pairs[1].0];
+    expected.sort_unstable();
+
+    // Renaming one catch parameter renames the enclosing binding and the other catch too.
+    let mut renamed = scoping.rename_symbol_with_shared_name(pairs[0].0, "_e".into());
+    renamed.sort_unstable();
+    assert_eq!(renamed, expected);
+    for &symbol in &expected {
+        let scope_id = scoping.symbol_scope_id(symbol);
+        assert_eq!(scoping.symbol_name(symbol), "_e");
+        assert_eq!(scoping.get_binding(scope_id, "_e".into()), Some(symbol));
+        assert_eq!(scoping.get_binding(scope_id, "e".into()), None);
+    }
+    for (catch, _) in pairs {
+        assert_eq!(scoping.catch_var_binding(catch), Some(outer));
+    }
+
+    let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
+    assert_eq!(scoping.rename_symbol_with_shared_name(other, "_other".into()), [other]);
+}
+
 fn assert_root_and_single_local_reference_counts(
     tester: &SemanticTester<'_>,
     expected: &[(&str, usize, usize)],

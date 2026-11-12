@@ -443,7 +443,7 @@ impl Scoping {
     /// The link is derived rather than stored: the catch parameter has a `var` redeclaration,
     /// and the enclosing binding has the same name in the nearest var scope. Both symbols
     /// print through one identifier, so they must be renamed together
-    /// (see [`Scoping::symbol_ids_with_shared_name`]).
+    /// (see [`Scoping::rename_symbol_with_shared_name`]).
     #[inline]
     pub fn catch_var_binding(&self, symbol_id: SymbolId) -> Option<SymbolId> {
         if !self.symbol_flags(symbol_id).is_catch_variable() {
@@ -1152,6 +1152,8 @@ impl Scoping {
     /// * No binding already exists in scope for `new_name`.
     ///
     /// Panics in debug mode if either of the above are not satisfied.
+    ///
+    /// Use [`Scoping::rename_symbol_with_shared_name`] to keep linked catch parameters in sync.
     pub fn rename_symbol(&mut self, symbol_id: SymbolId, scope_id: ScopeId, new_name: Ident<'_>) {
         self.cell.with_dependent_mut(|allocator, cell| {
             // Rename symbol
@@ -1166,6 +1168,23 @@ impl Scoping {
             let existing_symbol_id = bindings.insert(new_name, symbol_id);
             debug_assert!(existing_symbol_id.is_none());
         });
+    }
+
+    /// Rename `symbol_id` and every symbol that must keep the same name
+    /// (see [`Scoping::symbol_ids_with_shared_name`]), each in the scope that binds it.
+    ///
+    /// Returns the renamed symbols, so callers can update the identifiers that refer to them.
+    pub fn rename_symbol_with_shared_name(
+        &mut self,
+        symbol_id: SymbolId,
+        new_name: Ident<'_>,
+    ) -> Vec<SymbolId> {
+        // Collect before renaming: catch parameters are linked to a binding by name.
+        let symbol_ids = self.symbol_ids_with_shared_name(symbol_id).collect::<Vec<_>>();
+        for &symbol_id in &symbol_ids {
+            self.rename_symbol(symbol_id, self.symbol_scope_id(symbol_id), new_name);
+        }
+        symbol_ids
     }
 
     /// Remove bindings that exist only in TypeScript syntax.
