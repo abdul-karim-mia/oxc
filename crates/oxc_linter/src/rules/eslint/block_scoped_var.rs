@@ -240,7 +240,10 @@ fn run_for_declaration(pattern: &BindingPattern, node_scope_id: ScopeId, ctx: &L
     // e.g. "var [a, b] = [1, 2]"
     pattern.bound_names(&mut |ident| {
         let name = ident.name;
-        let symbol = ctx.scoping().var_declarator_binding(ident.symbol_id());
+        // The declarator's identifier is attached to the catch parameter when
+        // its initializer assigns there. This rule checks the hoisted var's uses.
+        let symbol = ident.symbol_id();
+        let symbol = ctx.scoping().catch_var_binding(symbol).unwrap_or(symbol);
 
         let binding = (pattern, name, &symbol);
 

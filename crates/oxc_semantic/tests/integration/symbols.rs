@@ -1,5 +1,5 @@
 use oxc_semantic::{Reference, ReferenceFlags, SymbolFlags};
-use oxc_span::{SourceType, Span};
+use oxc_span::SourceType;
 
 use crate::util::SemanticTester;
 
@@ -9,20 +9,16 @@ fn test_linked_symbol_names_survive_clone() {
         SemanticTester::js("let other; try {} catch (e) { var e; } try {} catch (e) { var e; }");
     let semantic = tester.build();
     let cloned = semantic.scoping().clone_in_with_semantic_ids_with_another_arena();
-    let pairs = semantic.scoping().catch_var_bindings().collect::<Vec<_>>();
+    let mut pairs = semantic.scoping().catch_var_bindings().collect::<Vec<_>>();
+    pairs.sort_unstable();
     assert_eq!(pairs.len(), 2);
-    let outer = pairs[0].1;
-    let mut expected = vec![outer, pairs[0].0, pairs[1].0];
-    expected.sort_unstable();
+    assert_eq!(pairs[0].1, pairs[1].1);
     for scoping in [semantic.scoping(), &cloned] {
-        for &symbol in &expected {
-            let mut group = scoping.symbol_ids_with_shared_name(symbol).collect::<Vec<_>>();
-            assert_eq!(group[0], outer);
-            group.sort_unstable();
-            assert_eq!(group, expected);
-        }
+        let mut actual = scoping.catch_var_bindings().collect::<Vec<_>>();
+        actual.sort_unstable();
+        assert_eq!(actual, pairs);
         let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
-        assert_eq!(scoping.symbol_ids_with_shared_name(other).collect::<Vec<_>>(), [other]);
+        assert_eq!(scoping.catch_var_binding(other), None);
     }
 }
 
@@ -39,6 +35,7 @@ fn test_rename_symbol_with_shared_name() {
 
     // Renaming one catch parameter renames the enclosing binding and the other catch too.
     let mut renamed = scoping.rename_symbol_with_shared_name(pairs[0].0, "_e".into());
+    assert_eq!(renamed[0], outer);
     renamed.sort_unstable();
     assert_eq!(renamed, expected);
     for &symbol in &expected {
@@ -53,38 +50,6 @@ fn test_rename_symbol_with_shared_name() {
 
     let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
     assert_eq!(scoping.rename_symbol_with_shared_name(other, "_other".into()), [other]);
-}
-
-#[test]
-fn test_redeclare_var_in_scope() {
-    // The first catch parameter is linked, the second is referenced, and the third is unused.
-    let tester = SemanticTester::js(
-        "function f() { try {} catch (e) { var e = 1 } try {} catch (e) { e } try {} catch (e) {} }",
-    );
-    let mut scoping = tester.build().into_scoping();
-    let catches = scoping
-        .symbol_ids()
-        .filter(|&symbol| scoping.symbol_flags(symbol).is_catch_variable())
-        .collect::<Vec<_>>();
-    let [linked, referenced, unused] = catches[..] else { panic!("expected three catches") };
-    let outer = scoping.catch_var_binding(linked).unwrap();
-    assert_eq!(scoping.var_declarator_binding(linked), outer);
-    assert_eq!(scoping.var_declarator_binding(outer), outer);
-
-    let span = Span::default();
-    let function_scope = scoping.symbol_scope_id(outer);
-    // An ordinary `var` keeps its symbol.
-    assert_eq!(scoping.redeclare_var_in_scope(outer, function_scope, span), outer);
-    // Outside any catch, the `var` declares only the enclosing binding.
-    assert_eq!(scoping.redeclare_var_in_scope(linked, function_scope, span), outer);
-    // An unused catch parameter is not linked.
-    let unused_scope = scoping.symbol_scope_id(unused);
-    assert_eq!(scoping.redeclare_var_in_scope(linked, unused_scope, span), outer);
-    assert_eq!(scoping.catch_var_binding(unused), None);
-    // A referenced catch parameter is redeclared, which links it to the enclosing binding.
-    let referenced_scope = scoping.symbol_scope_id(referenced);
-    assert_eq!(scoping.redeclare_var_in_scope(linked, referenced_scope, span), referenced);
-    assert_eq!(scoping.catch_var_binding(referenced), Some(outer));
 }
 
 fn assert_root_and_single_local_reference_counts(
