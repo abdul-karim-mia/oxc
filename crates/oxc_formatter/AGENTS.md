@@ -107,6 +107,18 @@ The markers say how it reads (`JsEmbeddedIn`, `ExpressionRoot`'s flags, `Program
   which the host reads as an expression (Vue's `@click` fails to compile it).
   Left as is for the cost: `semi: true` adds nested statements' `;` (`if (a) { b() };` prints `b();`), so telling it is a walk of every statement, function bodies included,
   for code that runs next to nothing. Loud, not wrong, as above
+- Known gap: under `ExpressionRoot::reads_as_statements`, a `;` the formatter adds or drops in a body or a TS type literal can be the code's only one
+  (`foo(() => { a() })` under `semi: true`, `(foo as { a: 1, b: 2 }).bar` printing its type literal's `;`), and the host reads the code otherwise:
+  Vue calls a reference or no longer does, and returns another expression's value or no longer does (which changes only whether it reports a rejected promise).
+  Left as is for the cost: which code prints a `;` is every nested statement and TS type member, and the root is the host's reading (Vue's `exp.content.includes(';')`);
+  a reference holding a body or a type literal is rare (none in some 2,350 real `.vue` files).
+  Unlike the gaps above, it is silent: the output compiles, and reads otherwise unnoticed
+- Known gap: under `JsEmbeddedIn::inlines_code`, a TS `as` / `satisfies` the code is (`(foo as any)`) prints without its parens,
+  which the host may put in code that reads it otherwise (Vue calls a cached reference as `foo as any && foo as any(...args)`, which does not parse in a Vite build).
+  Loud, not wrong, as above
+- Known gap: under `ExpressionRoot::reads_as_statements`, a leading `function` prints in parens,
+  which vue-tsc reads as code returning the function, not as the handler (`(function (e) {})`: `e` is untyped, `TS7006` under `noImplicitAny`).
+  Not wrong: Vue's compiler reads it as the handler, and wins (`crates/oxc_formatter_htmlish/AGENTS.md` "What Vue reads")
 
 Each kind's wrapper, checks and printing live in `print/embedded/`, one module per kind;
 a host's new use is a new policy of a kind (Astro's frontmatter is a `Program`), or a new `JsRoot` variant and module there (Svelte's `{@const}`).

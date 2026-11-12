@@ -694,10 +694,12 @@
 
 ## vue
 
-169/184 (91.85%)
+168/184 (91.30%)
 
 ### Failed
 
+- externals/prettier/vue/event-binding/assignment.vue (💥, 55.88%)
+  - apps/oxfmt/DIVERGENCES.md#js-in-vue-handler-lone-statement
 - externals/prettier/vue/event-binding/function-expression-ts.vue (💥, 64.29%)
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-handler-statements
 - externals/prettier/vue/interpolation/bitwise-or-operator.vue (💥, 68.75%)
@@ -710,9 +712,10 @@
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-removed-attributes-as-written
 - externals/prettier/vue/vue-3/style-variables.vue (💥, 71.43%)
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-removed-attributes-as-written
-- externals/prettier/vue/vue/attributes.vue (💥💥💥, 97.40%)
+- externals/prettier/vue/vue/attributes.vue (💥💥💥, 96.69%)
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-removed-attributes-as-written
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-handler-statements
+  - apps/oxfmt/DIVERGENCES.md#js-in-vue-handler-lone-statement
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-trailing-line-comment
 - externals/prettier/vue/vue/filter.vue (💥💥💥, 60.53%)
   - apps/oxfmt/DIVERGENCES.md#js-in-vue-bitwise-or
