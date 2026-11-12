@@ -93,8 +93,8 @@ impl Rule for NoRedeclare {
         };
 
         for symbol_id in ctx.scoping().symbol_ids() {
-            // A catch-local `var` assigns to the catch parameter but declares a
-            // separate enclosing binding. Check that binding's redeclarations only.
+            // A `var` redeclaring a catch parameter is allowed, and it also redeclares
+            // the enclosing binding, which is checked on its own. Skip the catch parameter.
             if ctx.scoping().catch_var_binding(symbol_id).is_some() {
                 continue;
             }
@@ -167,19 +167,6 @@ impl Rule for NoRedeclare {
             }
         }
     }
-}
-
-#[test]
-fn test_catch_var_bindings() {
-    use crate::tester::Tester;
-
-    let pass = vec!["function f() { try {} catch (e) { var e = 2; } }"];
-    let fail = vec!["function f() { try {} catch (e) { var e; var e; } }"];
-
-    Tester::new(NoRedeclare::NAME, NoRedeclare::PLUGIN, pass, fail)
-        .change_rule_path_extension("cjs")
-        .with_snapshot_suffix("catch-var-bindings")
-        .test_and_snapshot();
 }
 
 #[test]
@@ -265,6 +252,7 @@ fn test() {
             "function A(): string; function A(): number; function A() {} namespace A {}",
             Some(json!([{ "ignoreDeclarationMerge": true }])),
         ),
+        ("function f() { try {} catch (e) { var e = 2; } }", None),
     ];
 
     let fail = vec![
@@ -272,6 +260,7 @@ fn test() {
         ("var a = 3; var a = 10;", None),
         ("var a = {}; var a = [];", None),
         ("var a; function a() {}", None),
+        ("function f() { try {} catch (e) { var e; var e; } }", None),
         ("function a() {} function a() {}", None),
         ("var a = function() { }; var a = function() { }", None),
         ("var a = function() { }; var a = new Date();", None),

@@ -579,6 +579,10 @@ fn test_vars_catch() {
                 json!([{ "caughtErrors": "all", "caughtErrorsIgnorePattern": "^_", "reportUsedIgnorePattern": true }]),
             ),
         ),
+        // The `var` is unused, but its initializer writes the catch parameter.
+        ("function f() { try { throw 0 } catch (e) { var e = 1; console.log(e) } } f();", None),
+        // The catch parameter is unused, but the `var` initializer writes it.
+        ("function f() { try { throw 0 } catch (e) { var e = 1 } return e } f();", None),
     ];
 
     // these suggestion fixes are safe
@@ -622,28 +626,24 @@ fn test_vars_catch() {
             None,
             FixKind::Suggestion,
         ),
+        // Removing either declaration would retarget the `var` initializer, so no fix applies.
+        (
+            "function f() { try { throw 0 } catch (e) { var e = 1; console.log(e) } } f();",
+            "function f() { try { throw 0 } catch (e) { var e = 1; console.log(e) } } f();",
+            None,
+            FixKind::DangerousSuggestion,
+        ),
+        (
+            "function f() { try { throw 0 } catch (e) { var e = 1 } return e } f();",
+            "function f() { try { throw 0 } catch (e) { var e = 1 } return e } f();",
+            None,
+            FixKind::DangerousSuggestion,
+        ),
     ];
 
     Tester::new(NoUnusedVars::NAME, NoUnusedVars::PLUGIN, pass, fail)
         .expect_fix(fix)
         .with_snapshot_suffix("oxc-vars-catch")
-        .test_and_snapshot();
-}
-
-#[test]
-fn test_catch_var_bindings() {
-    let pass = vec![];
-    let fail = vec![
-        "function f() { try { throw 0 } catch (e) { var e = 1; console.log(e) } } f();",
-        "function f() { try { throw 0 } catch (e) { var e = 1 } return e } f();",
-    ];
-    let fix = fail
-        .iter()
-        .map(|source| (*source, *source, None, FixKind::DangerousSuggestion))
-        .collect::<Vec<_>>();
-    Tester::new(NoUnusedVars::NAME, NoUnusedVars::PLUGIN, pass, fail)
-        .expect_fix(fix)
-        .with_snapshot_suffix("catch-var-bindings")
         .test_and_snapshot();
 }
 
