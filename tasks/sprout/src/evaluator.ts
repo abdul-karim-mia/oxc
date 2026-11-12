@@ -216,10 +216,13 @@ type FixtureEvaluatorResult = Omit<EvaluatorResult, "logs">;
   }
 };
 
-export function doEval(source: string): EvaluatorResult {
+export async function doEval(source: string): Promise<EvaluatorResult> {
   "use strict";
 
   const originalConsole = globalThis.console;
+  const asynchronousErrors: unknown[] = [];
+  const onUnhandledRejection = (error: unknown) => asynchronousErrors.push(error);
+  process.on("unhandledRejection", onUnhandledRejection);
   const logs: Array<string> = [];
   const mockedLog = (...args: Array<any>) => {
     logs.push(
@@ -279,6 +282,7 @@ export function doEval(source: string): EvaluatorResult {
           params: [],
         },
       };
+      const module = {exports};
       let reachedInvoke = false;
       try {
         // run in an iife to avoid naming collisions
@@ -307,6 +311,16 @@ export function doEval(source: string): EvaluatorResult {
     })()`,
     )(require);
 
+    // Drain promise continuations and let Node report unhandled rejections while
+    // this fixture still owns its console and mounted React tree.
+    await new Promise<void>((done) => setImmediate(done));
+    if (asynchronousErrors.length > 0) {
+      return {
+        kind: "UnexpectedError",
+        value: "Unhandled fixture rejection: " + asynchronousErrors.map(String).join("\n"),
+        logs,
+      };
+    }
     const result = {
       ...evalResult,
       logs,
@@ -327,6 +341,7 @@ export function doEval(source: string): EvaluatorResult {
     try {
       cleanup();
     } finally {
+      process.removeListener("unhandledRejection", onUnhandledRejection);
       globalThis.console = originalConsole;
     }
   }

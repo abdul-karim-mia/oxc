@@ -318,6 +318,11 @@ export function toJSON(value: any, invokeFns: boolean = false): string {
     if (val === React) {
       return "[[ React ]]";
     }
+    if (React.isValidElement(val)) {
+      // React's owner/debug fields contain renderer fibers, random container
+      // keys, and timings. Only the element's public contents are observable.
+      return { type: val.type, key: val.key, props: val.props };
+    }
     if (typeof val === "function") {
       if (val.length === 0 && invokeFns) {
         return {

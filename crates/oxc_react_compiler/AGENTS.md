@@ -37,8 +37,9 @@ Add fixtures only; do not add Rust unit tests or inline linter `Tester` cases.
   - When a change makes such a fixture compile, rename it without the prefix and remove the old snapshot
 - Use `@outputMode:"lint"` for lint-only behavior; the snapshot records `Lint-mode diagnostics (differ from transform)` when `lint` and `compile` disagree
 - Snapshots are Oxc's golden output; never edit them by hand, and review them with the `insta-snapshots` skill
-- Fixtures with usable `FIXTURE_ENTRYPOINT` exports also run through `just sprout`, which compares original and compiled runtime behavior
-- Keep snapshot and Sprout pragma configuration together in `tests/common/mod.rs`; document runtime exclusions in `tasks/sprout/src/selection.ts`
+- Executable fixtures must export a usable `FIXTURE_ENTRYPOINT` with real inputs for `just sprout`, which compares original and compiled runtime behavior; missing entrypoints and `TodoAdd` placeholders fail CI
+- Cover unchanged and changed inputs with `sequentialRenders` when a fixture exercises memoization across renders
+- Keep snapshot and Sprout pragma configuration together in `tests/common/mod.rs`; document concrete snapshot-only runtime limitations in `tasks/sprout/src/exclusions.ts`
 
 ## Lint mode and Oxlint
 

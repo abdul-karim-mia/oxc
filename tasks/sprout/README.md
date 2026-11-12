@@ -13,16 +13,38 @@ The Rust bridge compiles the fixture sources using the same pragma parser and
 type providers as the compiler snapshot suite. JavaScript workers lower the
 original and compiled sources with the same Babel transforms, render them with
 React, and compare output, exceptions, and console logs. Each lane has a separate
-React environment; mounts are cleaned up after each evaluation. Evaluation has
+React environment; promise continuations settle before console capture ends,
+and mounts are cleaned up after each evaluation. Unhandled promise rejections
+fail the fixture. Evaluation has
 a ten-second timeout. A mismatch, unexpected compiler/evaluator error, or an
 empty runnable selection fails the command.
 
 Fixtures are discovered recursively under `crates/oxc_react_compiler/fixtures`.
-Existing exported `FIXTURE_ENTRYPOINT` objects enroll automatically. They support
+Every executable fixture must export a usable `FIXTURE_ENTRYPOINT`. They support
 `fn`, `params`, and optional `sequentialRenders`, following upstream Sprout.
 Diagnostic and lint-only fixtures remain covered by the Rust snapshot suite.
-Placeholders and runtime limitations are reported separately, with explicit
-reasons in `src/selection.ts`. Compiler failures have no expected-failure baseline.
+Missing entrypoints and `TodoAdd` placeholders fail the command. Snapshot-only
+fixtures need concrete reasons in `src/exclusions.ts`, such as an intentional
+infinite loop or an unavailable runtime dependency. Compiler failures have no
+expected-failure baseline.
+
+Use `sequentialRenders` to cover unchanged inputs, changed inputs, and a return to
+earlier inputs on the same mounted component. Each item supplies one props
+argument. For functions with several arguments, use an uncompiled wrapper that
+spreads an argument array:
+
+```js
+const first = [1, 2];
+const second = [3, 4];
+export const FIXTURE_ENTRYPOINT = {
+  fn: (args) => {
+    "use no memo";
+    return Component(...args);
+  },
+  params: [first],
+  sequentialRenders: [first, first, second, second, first],
+};
+```
 
 Arrays containing JSX are rendered as React children. The value serializer omits
 React's mutable internal state and normalizes function descriptions so parameter
