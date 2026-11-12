@@ -163,6 +163,7 @@ fn mangler() {
         "function _() { var foo = () => { var x } }",
         "function _() { class Foo { foo() { var x } } }",
         "function _() { var Foo = class { foo() { var x } } }",
+        "function _() { var foo; try {} catch (foo) { var foo = function() {} } }",
     ];
 
     let mut snapshot = String::new();

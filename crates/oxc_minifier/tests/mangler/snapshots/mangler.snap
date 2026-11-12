@@ -315,3 +315,11 @@ function _() {
 		}
 	};
 }
+
+function _() { var foo; try {} catch (foo) { var foo = function() {} } }
+function _() {
+	var foo;
+	try {} catch (foo) {
+		var foo = function() {};
+	}
+}

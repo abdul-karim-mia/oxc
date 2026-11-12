@@ -16,6 +16,14 @@ fn catch_var_preserves_enclosing_binding() {
 }
 
 #[test]
+fn catch_var_shadows_named_function_expression() {
+    test_smallest(
+        "(function a() { try {} catch (a) { var a } console.log(typeof a) })();",
+        "(function() { try {} catch (a) { var a } console.log(typeof a) })();",
+    );
+}
+
+#[test]
 fn regenerated_var_preserves_surviving_catch_binding() {
     test_smallest(
         "function f() { try { throw 0 } catch (y) { while (0) { try {} catch (y) { var y } } y = 2; use(y) } return y } use(f);",
