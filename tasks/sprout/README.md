@@ -13,15 +13,19 @@ The Rust bridge compiles the fixture sources using the same pragma parser and
 type providers as the compiler snapshot suite. JavaScript workers lower the
 original and compiled sources with the same Babel transforms, render them with
 React, and compare output, exceptions, and console logs. Each lane has a separate
-React environment; promise continuations settle before console capture ends,
-and mounts are cleaned up after each evaluation. Unhandled promise rejections
-fail the fixture. Evaluation has
-a ten-second timeout. A mismatch, unexpected compiler/evaluator error, or an
+React environment. Each render runs in async `act`, and HTML is captured after
+promise-driven React updates settle. Final unmounts and their promise
+continuations finish before console capture ends. Timer callbacks run on a
+fixture-local virtual clock starting at zero; finite timer work drains before
+capturing each render and after unmounting. Non-terminating timer work and unhandled promise rejections
+fail their own fixture. Evaluation has a ten-second timeout. A mismatch, unexpected compiler/evaluator error, or an
 empty runnable selection fails the command.
 
 Fixtures are discovered recursively under `crates/oxc_react_compiler/fixtures`.
 Every executable fixture must export a usable `FIXTURE_ENTRYPOINT`. They support
 `fn`, `params`, and optional `sequentialRenders`, following upstream Sprout.
+Function entrypoints may return values or JSX. React classes and `memo`,
+`forwardRef`, and `lazy` objects are rendered as components on both rendering paths.
 Diagnostic and lint-only fixtures remain covered by the Rust snapshot suite.
 Missing entrypoints and `TodoAdd` placeholders fail the command. Snapshot-only
 fixtures need concrete reasons in `src/exclusions.ts`, such as an intentional

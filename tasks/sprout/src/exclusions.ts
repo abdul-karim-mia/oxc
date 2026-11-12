@@ -162,11 +162,7 @@ export const runtimeExclusions = new Map([
   ],
   [
     "effect-local-reassigned-by-interval-callback.js",
-    "Requires timer advancement to exercise Date.now and interval callbacks",
-  ],
-  [
-    "effect-local-reassigned-in-async-callback.js",
-    "Requires timer advancement to exercise timeout creation and cleanup",
+    "Leaves a repeating interval active; requires bounded timer steps",
   ],
   [
     "exhaustive-deps/compile-files-with-exhaustive-deps-violation-in-effects.js",
@@ -749,10 +745,6 @@ export const runtimeExclusions = new Map([
   [
     "temporary-property-load-accessed-outside-scope.js",
     "Analysis-only fixture references undefined helpers: MaybeMutable, maybeMutate",
-  ],
-  [
-    "timers.js",
-    "Returns wall-clock timestamps and elapsed time, which differ between isolated evaluator lanes",
   ],
   [
     "todo-function-expression-captures-value-later-frozen.js",

@@ -5,7 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
+import { install, type Clock } from "@sinonjs/fake-timers";
 import { createRequire } from "node:module";
 import { JSDOM } from "jsdom";
 import React from "react";
@@ -62,7 +63,20 @@ export type EvaluatorResult = {
  * Define types and schemas for fixture entrypoint
  */
 const EntrypointSchema = z.strictObject({
-  fn: z.union([z.function(), z.object({})]),
+  // Preserve exotic component objects, including their React tag and identity.
+  // z.object({}) strips the properties React needs to render memo/forwardRef.
+  fn: z.custom<React.ComponentType<any> | React.ExoticComponent<any>>(
+    (value) =>
+      typeof value === "function"
+      || (typeof value === "object"
+        && value !== null
+        && "$$typeof" in value
+        && [
+          Symbol.for("react.memo"),
+          Symbol.for("react.forward_ref"),
+          Symbol.for("react.lazy"),
+        ].includes(value.$$typeof as symbol)),
+  ),
   params: z.array(z.any()),
 
   // DEPRECATED, unused
@@ -78,6 +92,13 @@ const ExportSchema = z.object({
 });
 
 const NO_ERROR_SENTINEL = Symbol();
+class EvaluatorError extends Error {}
+
+function exceptionValue(error: unknown): string {
+  // Stack traces vary after compilation, but error types and non-Error thrown
+  // values are observable and must not collapse to an undefined message.
+  return error instanceof Error ? error.toString() : (toJSON(error) ?? String(error));
+}
 /**
  * Wraps WrapperTestComponent in an error boundary to simplify re-rendering
  * when an exception is thrown.
@@ -118,7 +139,7 @@ class WrapperTestComponentWithErrorBoundary extends React.Component<
        * The last render errored, cache the error message to avoid running the
        * test fixture more than once
        */
-      const errorMsg = `[[ (exception in render) ${this.state.errorFromLastRender?.toString()} ]]`;
+      const errorMsg = `[[ (exception in render) ${exceptionValue(this.state.errorFromLastRender)} ]]`;
       this.propsErrorMap.set(this.lastProps, errorMsg);
       return errorMsg;
     }
@@ -132,6 +153,9 @@ class WrapperTestComponentWithErrorBoundary extends React.Component<
 }
 
 function WrapperTestComponent(props: { fn: any; params: Array<any> }) {
+  if (typeof props.fn === "object" || props.fn.prototype?.isReactComponent) {
+    return React.createElement(props.fn, props.params[0]);
+  }
   const result = props.fn(...props.params);
   // Hacky solution to determine whether the fixture returned jsx (which
   // needs to passed through to React's runtime as-is) or a non-jsx value
@@ -145,34 +169,70 @@ function WrapperTestComponent(props: { fn: any; params: Array<any> }) {
   }
 }
 
-function renderComponentSequentiallyForEachProps(fn: any, sequentialRenders: Array<any>): string {
+async function settle(action: () => void, clock: Clock): Promise<void> {
+  await act(async () => {
+    action();
+    // Keep React's act environment and fixture capture active for promise work
+    // and Node's unhandled-rejection notification. act then flushes the updates
+    // triggered by those continuations before resolving.
+    await new Promise<void>((done) => setImmediate(done));
+  });
+  // Timers run on a fixture-local clock, never on the workers' wall clocks.
+  // React effects can schedule more timers while applying a timer's updates.
+  for (let batch = 0; clock.countTimers() > 0; batch++) {
+    if (batch === 100) throw new EvaluatorError("Fixture timers did not settle");
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Commit each timer batch before observing newly scheduled effects.
+      await act(async () => {
+        await clock.runAllAsync();
+      });
+    } catch (error) {
+      throw new EvaluatorError("Fixture timers failed: " + exceptionValue(error));
+    }
+  }
+}
+
+async function renderComponentSequentiallyForEachProps(
+  fn: any,
+  sequentialRenders: Array<any>,
+  clock: Clock,
+): Promise<string> {
   if (sequentialRenders.length === 0) {
     throw new Error("Expected at least one set of props when using `sequentialRenders`");
   }
   const initialProps = sequentialRenders[0]!;
   const results = [];
-  const { rerender, container } = render(
-    React.createElement(WrapperTestComponentWithErrorBoundary, {
-      fn,
-      params: [initialProps],
-    }),
-  );
-  results.push(container.innerHTML);
-
-  for (let i = 1; i < sequentialRenders.length; i++) {
-    rerender(
+  let rendered!: ReturnType<typeof render>;
+  await settle(() => {
+    rendered = render(
       React.createElement(WrapperTestComponentWithErrorBoundary, {
         fn,
-        params: [sequentialRenders[i]],
+        params: [initialProps],
       }),
     );
-    results.push(container.innerHTML);
+  }, clock);
+  results.push(rendered.container.innerHTML);
+
+  for (let i = 1; i < sequentialRenders.length; i++) {
+    // oxlint-disable-next-line no-await-in-loop -- Observe each committed render before changing props.
+    await settle(() => {
+      rendered.rerender(
+        React.createElement(WrapperTestComponentWithErrorBoundary, {
+          fn,
+          params: [sequentialRenders[i]],
+        }),
+      );
+    }, clock);
+    results.push(rendered.container.innerHTML);
   }
   return results.join("\n");
 }
 
 type FixtureEvaluatorResult = Omit<EvaluatorResult, "logs">;
-(globalThis as any).evaluateFixtureExport = function (exports: unknown): FixtureEvaluatorResult {
+(globalThis as any).evaluateFixtureExport = async function (
+  exports: unknown,
+  clock: Clock,
+): Promise<FixtureEvaluatorResult> {
   const parsedExportResult = ExportSchema.safeParse(exports);
   if (!parsedExportResult.success) {
     const exportDetail =
@@ -186,32 +246,25 @@ type FixtureEvaluatorResult = Omit<EvaluatorResult, "logs">;
   }
   const entrypoint = parsedExportResult.data.FIXTURE_ENTRYPOINT;
   if (entrypoint.sequentialRenders !== null) {
-    const result = renderComponentSequentiallyForEachProps(
+    const result = await renderComponentSequentiallyForEachProps(
       entrypoint.fn,
       entrypoint.sequentialRenders,
+      clock,
     );
 
     return {
       kind: "ok",
       value: result ?? "null",
     };
-  } else if (typeof entrypoint.fn === "object") {
-    // Try to run fixture as a react component. This is necessary because not
-    // all components are functions (some are ForwardRef or Memo objects).
-    const result = render(React.createElement(entrypoint.fn as any, entrypoint.params[0])).container
-      .innerHTML;
-
-    return {
-      kind: "ok",
-      value: result ?? "null",
-    };
   } else {
-    const result = render(React.createElement(WrapperTestComponent, entrypoint)).container
-      .innerHTML;
+    let rendered!: ReturnType<typeof render>;
+    await settle(() => {
+      rendered = render(React.createElement(WrapperTestComponent, entrypoint));
+    }, clock);
 
     return {
       kind: "ok",
-      value: result ?? "null",
+      value: rendered.container.innerHTML,
     };
   }
 };
@@ -219,6 +272,11 @@ type FixtureEvaluatorResult = Omit<EvaluatorResult, "logs">;
 export async function doEval(source: string): Promise<EvaluatorResult> {
   "use strict";
 
+  const clock = install({
+    now: 0,
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date", "performance"],
+    loopLimit: 100,
+  });
   const originalConsole = globalThis.console;
   const asynchronousErrors: unknown[] = [];
   const onUnhandledRejection = (error: unknown) => asynchronousErrors.push(error);
@@ -268,13 +326,18 @@ export async function doEval(source: string): Promise<EvaluatorResult> {
     trace: () => {},
   };
   try {
-    // Evaluate CommonJS with an explicit resolver for fixture runtime modules.
-    // oxlint-disable-next-line typescript/no-implied-eval -- Executing fixture programs is the purpose of this harness.
-    const evalResult: any = new Function(
-      "require",
-      `
+    let result: FixtureEvaluatorResult;
+    try {
+      // Evaluate CommonJS with an explicit resolver for fixture runtime modules.
+      // oxlint-disable-next-line typescript/no-implied-eval -- Executing fixture programs is the purpose of this harness.
+      result = await new Function(
+        "require",
+        "exceptionValue",
+        "EvaluatorError",
+        "clock",
+        `
     "use strict";
-    return (() => {
+    return (async () => {
       // Exports should be overwritten by source
       let exports = {
         FIXTURE_ENTRYPOINT: {
@@ -294,52 +357,50 @@ export async function doEval(source: string): Promise<EvaluatorResult> {
             value: "Fixture not implemented",
           };
         }
-        return evaluateFixtureExport(exports);
+        return await evaluateFixtureExport(exports, clock);
       } catch (e) {
-        if (!reachedInvoke) {
+        if (!reachedInvoke || e instanceof EvaluatorError) {
           return {
             kind: "UnexpectedError",
-            value: e.message,
+            value: exceptionValue(e),
           };
         } else {
           return {
             kind: "exception",
-            value: e.message,
+            value: exceptionValue(e),
           };
         }
       }
     })()`,
-    )(require);
-
-    // Drain promise continuations and let Node report unhandled rejections while
-    // this fixture still owns its console and mounted React tree.
-    await new Promise<void>((done) => setImmediate(done));
-    if (asynchronousErrors.length > 0) {
-      return {
+      )(require, exceptionValue, EvaluatorError, clock);
+    } catch (e) {
+      // Syntax and module-initialization failures belong to the harness rather
+      // than the observable exceptions thrown by a fixture's entrypoint.
+      result = {
         kind: "UnexpectedError",
-        value: "Unhandled fixture rejection: " + asynchronousErrors.map(String).join("\n"),
-        logs,
+        value:
+          "Unexpected error during eval, possible syntax error?\n"
+          + (e instanceof Error ? e.message : String(e))
+          + "\n\nsource:\n"
+          + source,
       };
     }
-    const result = {
-      ...evalResult,
-      logs,
-    };
-    return result;
-  } catch (e) {
-    // syntax errors will cause the eval to throw and bubble up here
-    return {
-      kind: "UnexpectedError",
-      value:
-        "Unexpected error during eval, possible syntax error?\n"
-        + (e instanceof Error ? e.message : String(e))
-        + "\n\nsource:\n"
-        + source,
-      logs,
-    };
+
+    try {
+      await settle(cleanup, clock);
+    } catch (e) {
+      result = { kind: "UnexpectedError", value: "Fixture cleanup failed: " + String(e) };
+    }
+    if (asynchronousErrors.length > 0) {
+      result = {
+        kind: "UnexpectedError",
+        value: "Unhandled fixture rejection: " + asynchronousErrors.map(String).join("\n"),
+      };
+    }
+    return { ...result, logs };
   } finally {
     try {
-      cleanup();
+      clock.uninstall();
     } finally {
       process.removeListener("unhandledRejection", onUnhandledRejection);
       globalThis.console = originalConsole;
