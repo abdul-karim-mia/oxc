@@ -463,6 +463,7 @@ impl Scoping {
         })
     }
 
+    /// [`Scoping::catch_var_binding`], with the symbol's redeclarations already looked up.
     fn catch_var_binding_of(
         &self,
         symbol_id: SymbolId,
@@ -494,7 +495,7 @@ impl Scoping {
         let outer = self.catch_var_binding(symbol_id).unwrap_or(symbol_id);
         std::iter::once(outer).chain(
             self.catch_var_bindings()
-                .filter_map(move |(catch, binding)| (binding == outer).then_some(catch)),
+                .filter_map(move |(catch, var_binding)| (var_binding == outer).then_some(catch)),
         )
     }
 

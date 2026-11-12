@@ -119,6 +119,8 @@ impl<'a> PeepholeOptimizations {
         match &decl.id {
             BindingPattern::BindingIdentifier(ident) => {
                 if let Some(symbol_id) = ident.symbol_id.get() {
+                    // A catch-local `var` also declares the enclosing binding (its identifier
+                    // carries the catch parameter). Keep it while that binding is used.
                     if kind.is_var()
                         && let Some(outer) = ctx.scoping().catch_var_binding(symbol_id)
                         && !Self::symbol_is_unused_by_count(outer, ctx)

@@ -141,6 +141,8 @@ impl<'a> KeepVar<'a> {
         self.get_variable_declaration(ctx).map(Statement::VariableDeclaration)
     }
 
+    /// Like [`Self::get_variable_declaration_statement`], for a declaration placed in
+    /// `scope_id` instead of the current scope (e.g. inside a catch body).
     pub fn get_variable_declaration_statement_in(
         self,
         scope_id: ScopeId,

@@ -800,6 +800,7 @@ impl<'a> PeepholeOptimizations {
         }
         // Eval in the binding's scope can read writes from a nested block or function,
         // even when that nested scope has no direct eval or resolved reads of its own.
+        // This also covers eval in the current scope: the flag propagates to enclosing scopes.
         let scope_id = ctx.scoping().symbol_scope_id(symbol_id);
         if ctx.scoping().scope_flags(scope_id).contains_direct_eval() {
             return false;

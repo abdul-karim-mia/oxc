@@ -71,8 +71,9 @@ impl<'a, 'b: 'a, 't> NameSymbolCollector<'a, 'b, 't> {
                     || self.has_name_set_reference_node(*symbol_id)
             })
             .for_each(|symbol_id| symbol_ids.set_bit(symbol_id.index()));
-        // Visit only symbols that actually have redeclarations. Ordinary `var`
-        // redeclarations can infer names too, even in files without linked catches.
+        // A redeclaration's initializer can also name a function or class, as in
+        // `var foo; var foo = function() {}` or a catch-local `var`. Only redeclared
+        // symbols need this check.
         for (symbol_id, declarations) in self.scoping.iter_symbol_redeclarations() {
             if !symbol_ids.has_bit(symbol_id.index())
                 && declarations.iter().skip(1).any(|redeclaration| {

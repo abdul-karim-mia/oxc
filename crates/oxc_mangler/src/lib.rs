@@ -612,9 +612,9 @@ impl<'a> SlotAssignment<'a> {
         }
     }
 
-    // Specialize once per file so ordinary files do no linked-binding work in
+    // Specialize once per file so ordinary files do no linked-catch work in
     // the scope/symbol loops below.
-    fn compute_impl<const HAS_LINKED_BINDINGS: bool>(
+    fn compute_impl<const HAS_LINKED_CATCHES: bool>(
         allocator: &'a Allocator,
         scoping: &'a Scoping,
         ast_nodes: &AstNodes,
@@ -638,9 +638,9 @@ impl<'a> SlotAssignment<'a> {
         // Pre-computed BitSet for ancestor membership tests - reused across iterations
         let mut ancestor_set = BitSet::new_in(scoping.scopes_len(), allocator);
         // Catch parameters redeclared by `var`, keyed by the enclosing binding whose name they
-        // print with (see the end).
+        // print with. Their slots are copied after the walk.
         let mut linked_catches = FxHashMap::<SymbolId, Vec<SymbolId>>::default();
-        if HAS_LINKED_BINDINGS {
+        if HAS_LINKED_CATCHES {
             for (catch, outer) in scoping.catch_var_bindings() {
                 linked_catches.entry(outer).or_default().push(catch);
             }
@@ -664,8 +664,9 @@ impl<'a> SlotAssignment<'a> {
             // Sort `bindings` in declaration order.
             tmp_bindings.clear();
             tmp_bindings.extend(bindings.values().copied().filter(|&binding| {
-                // A linked catch parameter shares the enclosing binding's slot (see the end).
-                (!HAS_LINKED_BINDINGS || scoping.catch_var_binding(binding).is_none())
+                // A linked catch parameter shares the enclosing binding's slot, copied after
+                // the walk.
+                (!HAS_LINKED_CATCHES || scoping.catch_var_binding(binding).is_none())
                     && constraints.is_mangle_candidate(binding, scoping)
             }));
             if tmp_bindings.is_empty() {
@@ -760,8 +761,9 @@ impl<'a> SlotAssignment<'a> {
                     }
                 };
                 mark_symbol_live(symbol_id);
-                // Linked catch parameters print this binding's name too.
-                if HAS_LINKED_BINDINGS && let Some(catches) = linked_catches.get(&symbol_id) {
+                // Linked catch parameters print this binding's name too, so the slot must
+                // stay live wherever they are used.
+                if HAS_LINKED_CATCHES && let Some(catches) = linked_catches.get(&symbol_id) {
                     for &catch in catches {
                         mark_symbol_live(catch);
                     }

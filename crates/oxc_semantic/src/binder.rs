@@ -72,8 +72,9 @@ impl<'a> Binder<'a> for VariableDeclarator<'a> {
                 let mut catch_symbol_id = None;
 
                 for &scope_id in &var_scope_ids {
-                    // Cached hoisted variables are checked in the target scope. Inspect only
-                    // local bindings here to find catch parameters without repeating diagnostics.
+                    // Only local bindings matter here, to find catch parameters. An earlier
+                    // `var` cached in `hoisting_variables` is found through the target scope
+                    // instead, so its diagnostics are not repeated for every scope.
                     // Type-only bindings (type aliases, interfaces) live in a separate
                     // declaration space, so a hoisted `var` must not merge into them.
                     if let Some(symbol_id) = builder.scoping.get_binding(scope_id, name)
@@ -91,7 +92,8 @@ impl<'a> Binder<'a> for VariableDeclarator<'a> {
                         // also creates a separate binding in the enclosing var scope. Its
                         // initializer assigns to the nearest catch binding. Destructured catch
                         // parameters already reported an error above; keep the bindings separate
-                        // during recovery too.
+                        // during recovery too. The innermost catch parameter wins; keep checking
+                        // the enclosing scopes for conflicts.
                         if builder.scoping.symbol_flags(symbol_id).is_catch_variable() {
                             catch_symbol_id.get_or_insert(symbol_id);
                             continue;
