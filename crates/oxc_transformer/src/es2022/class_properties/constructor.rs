@@ -551,17 +551,23 @@ impl<'a> ClassProperties<'a> {
         }
 
         // Rename symbols to UIDs
-        let mut renamed = ArenaVec::new_in(ctx);
+        let mut renames = ArenaVec::new_in(ctx);
         for (&symbol_id, name) in clashing_symbols.iter_mut() {
             // Generate replacement UID name
             let new_name = ctx.generate_uid_name(name);
             // Save replacement name in `clashing_symbols`
             *name = new_name;
-            // Rename symbol and binding, and any symbols that must keep the same name
-            let symbol_ids = ctx.scoping_mut().rename_symbol_with_shared_name(symbol_id, new_name);
-            renamed.extend(symbol_ids.into_iter().map(|id| (id, new_name)));
+            // Linked catch parameters have separate identities, but their `var`
+            // declarators must keep the same name as this constructor binding.
+            renames.extend(
+                ctx.scoping().symbol_ids_with_shared_name(symbol_id).map(|id| (id, new_name)),
+            );
         }
-        clashing_symbols.extend(renamed);
+        for (symbol_id, new_name) in renames {
+            let scope_id = ctx.scoping().symbol_scope_id(symbol_id);
+            ctx.scoping_mut().rename_symbol(symbol_id, scope_id, new_name);
+            clashing_symbols.insert(symbol_id, new_name);
+        }
 
         // Rename identifiers for clashing symbols in constructor params and body
         let mut renamer = ConstructorSymbolRenamer::new(clashing_symbols, ctx);

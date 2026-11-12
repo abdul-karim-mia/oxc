@@ -70,7 +70,7 @@ impl<'a> KeepVar<'a> {
 
     /// Declare the collected `var`s in `scope_id`, where the declaration will be placed.
     fn get_variable_declaration_in(
-        mut self,
+        self,
         scope_id: ScopeId,
         ctx: &mut crate::TraverseCtx<'a>,
     ) -> Option<ArenaBox<'a, VariableDeclaration<'a>>> {
@@ -78,31 +78,24 @@ impl<'a> KeepVar<'a> {
             return None;
         }
 
-        for (name, span, symbol_id) in &mut self.vars {
-            if let Some(symbol_id) = symbol_id {
-                *symbol_id = Self::declared_symbol(*name, *span, *symbol_id, scope_id, ctx);
-            }
+        let kind = VariableDeclarationKind::Var;
+        let mut decls = ArenaVec::with_capacity_in(self.vars.len(), ctx.builder());
+        for &(name, span, symbol_id) in &self.vars {
+            let symbol_id = symbol_id
+                .map(|symbol_id| Self::declared_symbol(name, span, symbol_id, scope_id, ctx));
+            let builder = ctx.builder();
+            let id = symbol_id.map_or_else(
+                || BindingPattern::new_binding_identifier(span, name, builder),
+                |symbol_id| {
+                    BindingPattern::new_binding_identifier_with_symbol_id(
+                        span, name, symbol_id, builder,
+                    )
+                },
+            );
+            decls.push(VariableDeclarator::new(span, id, None, None, false, builder));
         }
 
-        let builder = ctx.builder();
-
-        let kind = VariableDeclarationKind::Var;
-        let decls = ArenaVec::from_iter_in(
-            self.vars.into_iter().map(|(name, span, symbol_id)| {
-                let id = symbol_id.map_or_else(
-                    || BindingPattern::new_binding_identifier(span, name, builder),
-                    |symbol_id| {
-                        BindingPattern::new_binding_identifier_with_symbol_id(
-                            span, name, symbol_id, builder,
-                        )
-                    },
-                );
-                VariableDeclarator::new(span, id, None, None, false, builder)
-            }),
-            builder,
-        );
-
-        Some(VariableDeclaration::boxed(SPAN, kind, decls, false, builder))
+        Some(VariableDeclaration::boxed(SPAN, kind, decls, false, ctx.builder()))
     }
 
     /// The symbol for a regenerated `var` identifier placed in `scope_id`: the binding semantic

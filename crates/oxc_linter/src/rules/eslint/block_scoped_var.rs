@@ -1,9 +1,9 @@
-use crate::{AstNode, context::LintContext, rule::Rule};
+use crate::{AstNode, context::LintContext, rule::Rule, utils::declarator_initializes};
 use oxc_ast::{AstKind, ast::BindingPattern};
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_ecmascript::BoundNames;
 use oxc_macros::declare_oxc_lint;
-use oxc_semantic::{Scoping, declarator_initializes};
+use oxc_semantic::Scoping;
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 use oxc_syntax::{scope::ScopeId, symbol::SymbolId};

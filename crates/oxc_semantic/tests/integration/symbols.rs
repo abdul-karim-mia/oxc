@@ -9,47 +9,21 @@ fn test_linked_symbol_names_survive_clone() {
         SemanticTester::js("let other; try {} catch (e) { var e; } try {} catch (e) { var e; }");
     let semantic = tester.build();
     let cloned = semantic.scoping().clone_in_with_semantic_ids_with_another_arena();
-    let mut pairs = semantic.scoping().catch_var_bindings().collect::<Vec<_>>();
-    pairs.sort_unstable();
-    assert_eq!(pairs.len(), 2);
-    assert_eq!(pairs[0].1, pairs[1].1);
-    for scoping in [semantic.scoping(), &cloned] {
-        let mut actual = scoping.catch_var_bindings().collect::<Vec<_>>();
-        actual.sort_unstable();
-        assert_eq!(actual, pairs);
-        let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
-        assert_eq!(scoping.catch_var_binding(other), None);
-    }
-}
-
-#[test]
-fn test_rename_symbol_with_shared_name() {
-    let tester =
-        SemanticTester::js("let other; try {} catch (e) { var e; } try {} catch (e) { var e; }");
-    let mut scoping = tester.build().into_scoping();
-    let pairs = scoping.catch_var_bindings().collect::<Vec<_>>();
+    let pairs = semantic.scoping().catch_var_bindings().collect::<Vec<_>>();
     assert_eq!(pairs.len(), 2);
     let outer = pairs[0].1;
     let mut expected = vec![outer, pairs[0].0, pairs[1].0];
     expected.sort_unstable();
-
-    // Renaming one catch parameter renames the enclosing binding and the other catch too.
-    let mut renamed = scoping.rename_symbol_with_shared_name(pairs[0].0, "_e".into());
-    assert_eq!(renamed[0], outer);
-    renamed.sort_unstable();
-    assert_eq!(renamed, expected);
-    for &symbol in &expected {
-        let scope_id = scoping.symbol_scope_id(symbol);
-        assert_eq!(scoping.symbol_name(symbol), "_e");
-        assert_eq!(scoping.get_binding(scope_id, "_e".into()), Some(symbol));
-        assert_eq!(scoping.get_binding(scope_id, "e".into()), None);
+    for scoping in [semantic.scoping(), &cloned] {
+        for &symbol in &expected {
+            let mut group = scoping.symbol_ids_with_shared_name(symbol).collect::<Vec<_>>();
+            assert_eq!(group[0], outer);
+            group.sort_unstable();
+            assert_eq!(group, expected);
+        }
+        let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
+        assert_eq!(scoping.symbol_ids_with_shared_name(other).collect::<Vec<_>>(), [other]);
     }
-    for (catch, _) in pairs {
-        assert_eq!(scoping.catch_var_binding(catch), Some(outer));
-    }
-
-    let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
-    assert_eq!(scoping.rename_symbol_with_shared_name(other, "_other".into()), [other]);
 }
 
 fn assert_root_and_single_local_reference_counts(

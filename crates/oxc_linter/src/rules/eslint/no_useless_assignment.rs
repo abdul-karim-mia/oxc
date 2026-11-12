@@ -19,11 +19,11 @@ use oxc_cfg::{
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_index::IndexVec;
 use oxc_macros::declare_oxc_lint;
-use oxc_semantic::{NodeId, Reference, ScopeId, SymbolId, declarator_initializes};
+use oxc_semantic::{NodeId, Reference, ScopeId, SymbolId};
 use oxc_span::GetSpan;
 use oxc_span::Span;
 
-use crate::{context::LintContext, rule::Rule};
+use crate::{context::LintContext, rule::Rule, utils::declarator_initializes};
 
 fn no_useless_assignment_diagnostic(span: Span) -> OxcDiagnostic {
     OxcDiagnostic::warn("This assigned value is not used in subsequent statements.")

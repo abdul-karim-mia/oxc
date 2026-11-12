@@ -443,7 +443,7 @@ impl Scoping {
     /// The link is derived rather than stored: the catch parameter has a `var` redeclaration,
     /// and the enclosing binding has the same name in the nearest var scope. Both symbols
     /// print through one identifier, so they must be renamed together
-    /// (see [`Scoping::rename_symbol_with_shared_name`]).
+    /// (see [`Scoping::symbol_ids_with_shared_name`]).
     #[inline]
     pub fn catch_var_binding(&self, symbol_id: SymbolId) -> Option<SymbolId> {
         if !self.symbol_flags(symbol_id).is_catch_variable() {
@@ -480,6 +480,23 @@ impl Scoping {
             .scope_ancestors(self.symbol_scope_id(symbol_id))
             .find(|&scope_id| self.scope_flags(scope_id).is_var())?;
         self.get_binding(var_scope_id, self.symbol_ident(symbol_id))
+    }
+
+    /// Iterate all symbols that must be renamed together with `symbol_id`.
+    ///
+    /// A catch parameter and the enclosing binding declared by a same-named `var`
+    /// have distinct identities, but their declarations must print the same name.
+    /// The enclosing binding is yielded first, followed by its linked catch parameters
+    /// in unspecified order. An unlinked symbol yields only itself.
+    pub fn symbol_ids_with_shared_name(
+        &self,
+        symbol_id: SymbolId,
+    ) -> impl Iterator<Item = SymbolId> + '_ {
+        let outer = self.catch_var_binding(symbol_id).unwrap_or(symbol_id);
+        std::iter::once(outer).chain(
+            self.catch_var_bindings()
+                .filter_map(move |(catch, var_binding)| (var_binding == outer).then_some(catch)),
+        )
     }
 
     #[inline]
@@ -1135,8 +1152,6 @@ impl Scoping {
     /// * No binding already exists in scope for `new_name`.
     ///
     /// Panics in debug mode if either of the above are not satisfied.
-    ///
-    /// Use [`Scoping::rename_symbol_with_shared_name`] to keep linked catch parameters in sync.
     pub fn rename_symbol(&mut self, symbol_id: SymbolId, scope_id: ScopeId, new_name: Ident<'_>) {
         self.cell.with_dependent_mut(|allocator, cell| {
             // Rename symbol
@@ -1151,33 +1166,6 @@ impl Scoping {
             let existing_symbol_id = bindings.insert(new_name, symbol_id);
             debug_assert!(existing_symbol_id.is_none());
         });
-    }
-
-    /// Rename `symbol_id` and every symbol that must keep the same name, each in the scope
-    /// that binds it.
-    ///
-    /// A catch parameter and the enclosing binding declared by a same-named `var` have distinct
-    /// identities, but print through one identifier (see [`Scoping::catch_var_binding`]).
-    /// Renaming either renames the enclosing binding and all of its linked catch parameters.
-    ///
-    /// Returns the renamed symbols, enclosing binding first, so callers can update the
-    /// identifiers that refer to them.
-    pub fn rename_symbol_with_shared_name(
-        &mut self,
-        symbol_id: SymbolId,
-        new_name: Ident<'_>,
-    ) -> Vec<SymbolId> {
-        // Collect before renaming: catch parameters are linked to a binding by name.
-        let outer = self.catch_var_binding(symbol_id).unwrap_or(symbol_id);
-        let mut symbol_ids = vec![outer];
-        symbol_ids.extend(
-            self.catch_var_bindings()
-                .filter_map(|(catch, var_binding)| (var_binding == outer).then_some(catch)),
-        );
-        for &symbol_id in &symbol_ids {
-            self.rename_symbol(symbol_id, self.symbol_scope_id(symbol_id), new_name);
-        }
-        symbol_ids
     }
 
     /// Remove bindings that exist only in TypeScript syntax.
