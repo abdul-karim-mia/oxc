@@ -1,5 +1,5 @@
 use oxc_semantic::{Reference, ReferenceFlags, SymbolFlags};
-use oxc_span::SourceType;
+use oxc_span::{SourceType, Span};
 
 use crate::util::SemanticTester;
 
@@ -53,6 +53,38 @@ fn test_rename_symbol_with_shared_name() {
 
     let other = scoping.get_binding(scoping.root_scope_id(), "other".into()).unwrap();
     assert_eq!(scoping.rename_symbol_with_shared_name(other, "_other".into()), [other]);
+}
+
+#[test]
+fn test_redeclare_var_in_scope() {
+    // The first catch parameter is linked, the second is referenced, and the third is unused.
+    let tester = SemanticTester::js(
+        "function f() { try {} catch (e) { var e = 1 } try {} catch (e) { e } try {} catch (e) {} }",
+    );
+    let mut scoping = tester.build().into_scoping();
+    let catches = scoping
+        .symbol_ids()
+        .filter(|&symbol| scoping.symbol_flags(symbol).is_catch_variable())
+        .collect::<Vec<_>>();
+    let [linked, referenced, unused] = catches[..] else { panic!("expected three catches") };
+    let outer = scoping.catch_var_binding(linked).unwrap();
+    assert_eq!(scoping.var_declarator_binding(linked), outer);
+    assert_eq!(scoping.var_declarator_binding(outer), outer);
+
+    let span = Span::default();
+    let function_scope = scoping.symbol_scope_id(outer);
+    // An ordinary `var` keeps its symbol.
+    assert_eq!(scoping.redeclare_var_in_scope(outer, function_scope, span), outer);
+    // Outside any catch, the `var` declares only the enclosing binding.
+    assert_eq!(scoping.redeclare_var_in_scope(linked, function_scope, span), outer);
+    // An unused catch parameter is not linked.
+    let unused_scope = scoping.symbol_scope_id(unused);
+    assert_eq!(scoping.redeclare_var_in_scope(linked, unused_scope, span), outer);
+    assert_eq!(scoping.catch_var_binding(unused), None);
+    // A referenced catch parameter is redeclared, which links it to the enclosing binding.
+    let referenced_scope = scoping.symbol_scope_id(referenced);
+    assert_eq!(scoping.redeclare_var_in_scope(linked, referenced_scope, span), referenced);
+    assert_eq!(scoping.catch_var_binding(referenced), Some(outer));
 }
 
 fn assert_root_and_single_local_reference_counts(

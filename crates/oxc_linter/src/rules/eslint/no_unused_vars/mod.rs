@@ -17,7 +17,7 @@ use options::{IgnorePattern, NoUnusedVarsFixMode, NoUnusedVarsOptions};
 use oxc_ast::{AstKind, AstType, ast::CatchParameter};
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_macros::declare_oxc_lint;
-use oxc_semantic::{AstNode, ScopeFlags, SymbolFlags};
+use oxc_semantic::{AstNode, ScopeFlags, SymbolFlags, declarator_initializes};
 use oxc_span::{GetSpan, Span};
 use schemars::JsonSchema;
 use symbol::Symbol;
@@ -26,7 +26,6 @@ use crate::{
     context::{ContextHost, LintContext},
     rule::Rule,
     rules::eslint::no_unused_vars::options::VarsOption,
-    utils::declarator_initializes,
 };
 
 #[derive(JsonSchema, Debug)]

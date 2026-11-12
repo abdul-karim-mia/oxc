@@ -1,9 +1,9 @@
-use crate::{AstNode, context::LintContext, rule::Rule, utils::declarator_initializes};
+use crate::{AstNode, context::LintContext, rule::Rule};
 use oxc_ast::{AstKind, ast::BindingPattern};
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_ecmascript::BoundNames;
 use oxc_macros::declare_oxc_lint;
-use oxc_semantic::Scoping;
+use oxc_semantic::{Scoping, declarator_initializes};
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 use oxc_syntax::{scope::ScopeId, symbol::SymbolId};
@@ -240,10 +240,7 @@ fn run_for_declaration(pattern: &BindingPattern, node_scope_id: ScopeId, ctx: &L
     // e.g. "var [a, b] = [1, 2]"
     pattern.bound_names(&mut |ident| {
         let name = ident.name;
-        // The declarator's identifier is attached to the catch parameter when
-        // its initializer assigns there. This rule checks the hoisted var's uses.
-        let symbol = ident.symbol_id();
-        let symbol = ctx.scoping().catch_var_binding(symbol).unwrap_or(symbol);
+        let symbol = ctx.scoping().var_declarator_binding(ident.symbol_id());
 
         let binding = (pattern, name, &symbol);
 

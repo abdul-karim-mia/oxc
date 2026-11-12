@@ -452,6 +452,16 @@ impl Scoping {
         self.catch_var_binding_of(symbol_id, self.symbol_redeclarations(symbol_id))
     }
 
+    /// Get the binding declared by a `var` declarator whose identifier carries `symbol_id`.
+    ///
+    /// That is usually `symbol_id`, but an identifier that redeclares a catch parameter carries
+    /// the catch parameter while declaring the enclosing var binding
+    /// (see [`Scoping::catch_var_binding`]).
+    #[inline]
+    pub fn var_declarator_binding(&self, symbol_id: SymbolId) -> SymbolId {
+        self.catch_var_binding(symbol_id).unwrap_or(symbol_id)
+    }
+
     /// Iterate `(catch parameter, enclosing var binding)` pairs in unspecified order.
     /// See [`Scoping::catch_var_binding`].
     pub fn catch_var_bindings(&self) -> impl Iterator<Item = (SymbolId, SymbolId)> + '_ {
@@ -497,6 +507,42 @@ impl Scoping {
             self.catch_var_bindings()
                 .filter_map(move |(catch, var_binding)| (var_binding == outer).then_some(catch)),
         )
+    }
+
+    /// Get the symbol for a `var` identifier, originally bound to `symbol_id`, when the `var`
+    /// is declared again without an initializer in `scope_id` (e.g. kept from removed code).
+    ///
+    /// Returns the binding semantic analysis would give the identifier there, so a fresh
+    /// analysis of the output agrees. Usually that is `symbol_id`. A `var` that redeclared a
+    /// catch parameter (see [`Scoping::catch_var_binding`]) redeclares whichever catch parameter
+    /// its name resolves to from `scope_id`, recording the redeclaration that links it, or else
+    /// declares only the enclosing var binding. A catch parameter without references is not
+    /// linked, so the `var` stays valid if that parameter is removed.
+    pub fn redeclare_var_in_scope(
+        &mut self,
+        symbol_id: SymbolId,
+        scope_id: ScopeId,
+        span: Span,
+    ) -> SymbolId {
+        let Some(var_binding) = self.catch_var_binding(symbol_id) else { return symbol_id };
+        match self.find_binding(scope_id, self.symbol_ident(symbol_id)) {
+            Some(catch)
+                if self.symbol_flags(catch).is_catch_variable()
+                    && !self.symbol_is_unused(catch) =>
+            {
+                if self.catch_var_binding(catch).is_none() {
+                    self.add_symbol_redeclaration(
+                        catch,
+                        SymbolFlags::FunctionScopedVariable,
+                        NodeId::DUMMY,
+                        span,
+                    );
+                }
+                debug_assert_eq!(self.catch_var_binding(catch), Some(var_binding));
+                catch
+            }
+            _ => var_binding,
+        }
     }
 
     #[inline]
