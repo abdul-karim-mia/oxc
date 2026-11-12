@@ -69,7 +69,7 @@ impl<'a> KeepVar<'a> {
     }
 
     /// Declare the collected `var`s in `scope_id`, where the declaration will be placed.
-    pub fn get_variable_declaration_in(
+    fn get_variable_declaration_in(
         self,
         scope_id: ScopeId,
         ctx: &mut crate::TraverseCtx<'a>,
