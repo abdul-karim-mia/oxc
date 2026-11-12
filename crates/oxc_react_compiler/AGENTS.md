@@ -37,6 +37,8 @@ Add fixtures only; do not add Rust unit tests or inline linter `Tester` cases.
   - When a change makes such a fixture compile, rename it without the prefix and remove the old snapshot
 - Use `@outputMode:"lint"` for lint-only behavior; the snapshot records `Lint-mode diagnostics (differ from transform)` when `lint` and `compile` disagree
 - Snapshots are Oxc's golden output; never edit them by hand, and review them with the `insta-snapshots` skill
+- Fixtures with usable `FIXTURE_ENTRYPOINT` exports also run through `just sprout`, which compares original and compiled runtime behavior
+- Keep snapshot and Sprout pragma configuration together in `tests/common/mod.rs`; document runtime exclusions in `tasks/sprout/src/selection.ts`
 
 ## Lint mode and Oxlint
 
@@ -64,5 +66,6 @@ The compiler runs on every component or hook file in Oxlint and the transformer.
 ## Verification
 
 - Always: `cargo test -p oxc_react_compiler` and `just lint -p oxc_react_compiler`
+- For compiler behavior changes: `just sprout` (use `just sprout --filter <path>` while debugging)
 - If Oxlint is affected: `cargo test -p oxc_linter`, then `pnpm --dir apps/oxlint build-test && pnpm --dir apps/oxlint test`
 - If `transform-react` is affected: `pnpm --dir napi/transform-react build-test && pnpm --dir napi/transform-react test`

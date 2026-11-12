@@ -734,7 +734,18 @@ fn lower_inner<'a>(
         promote_temporary(&mut builder, place.identifier);
         hir_params.push(ParamPattern::Place(Place { span: None, ..place }));
         let value = if let Some(initializer) = &param.initializer {
-            lower_default_to_temp(&mut builder, param_span, initializer, place)?
+            if matches!(
+                &**initializer,
+                oxc::Expression::JSXElement(_) | oxc::Expression::JSXFragment(_)
+            ) {
+                // Unlike the TS implementation, retain JSX defaults in their
+                // parameter environment. Moving them into the body can change
+                // which binding a tag resolves to (including fbt/fbs imports).
+                builder.environment_mut().skip_compilation = true;
+                place
+            } else {
+                lower_default_to_temp(&mut builder, param_span, initializer, place)?
+            }
         } else {
             place
         };
@@ -3672,23 +3683,19 @@ impl<'a> Visit<'a> for TSEnumCaptureVisitor<'_, 'a> {
     }
 }
 
-/// Whether preserving an enum as an opaque node would hide a capture from the
-/// nested function's HIR. Top-level component enums cannot capture component
-/// state, and module bindings are outside the captured scope range.
+/// Whether an opaque enum would hide reads or writes of function-local bindings
+/// from HIR analysis. Module bindings remain outside the captured scope range.
 fn ts_enum_has_captured_reference<'a>(
     builder: &HirBuilder<'a, '_>,
     declaration: &oxc::TSEnumDeclaration<'a>,
 ) -> bool {
     let function_scope = builder.function_scope();
-    if function_scope == builder.component_scope() {
-        return false;
-    }
-    let Some(parent_scope) = builder.scope().scope_parent(function_scope) else {
-        return false;
-    };
     let mut visitor = TSEnumCaptureVisitor {
         scope: builder.scope(),
-        captured_scopes: capture_scopes(builder.scope(), parent_scope, builder.component_scope()),
+        // Unlike the TS implementation, include the current function's locals:
+        // opaque enum initializers can read or write them, and HIR optimization
+        // must not erase those bindings or fold values across hidden writes.
+        captured_scopes: capture_scopes(builder.scope(), function_scope, builder.component_scope()),
         found: false,
     };
     visitor.visit_ts_enum_declaration(declaration);
