@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::diagnostics;
-use crate::react_compiler_hir::environment::Environment;
+use crate::react_compiler_hir::environment::{Environment, OutputMode};
 use crate::react_compiler_hir::*;
 use crate::react_compiler_utils::{FxIndexMap, FxIndexSet, IdentIndexMap};
 use crate::scope::BindingKind as AstBindingKind;
@@ -575,6 +575,19 @@ pub fn lower<'a>(
 
     // Pre-compute context identifiers: variables captured across function boundaries
     let context_identifiers = find_context_identifiers(func, scope, &identifier_spans)?;
+
+    // Unlike the TS implementation, we support updates to captured parameters.
+    // A nested factory can return a closure that mutates its own parameter cell,
+    // though: caching that factory call would retain the cell across renders.
+    // Preserve the source until inference can model these fresh mutable cells.
+    if env.output_mode != OutputMode::Lint
+        && context_identifiers.iter().any(|&symbol| {
+            scope.binding_kind(symbol) == AstBindingKind::Param
+                && scope.symbol_scope(symbol) != scope_id
+        })
+    {
+        env.skip_compilation = true;
+    }
 
     // For top-level functions, context is empty (no captured refs)
     let context_map: FxIndexMap<SymbolId, Option<Span>> = FxIndexMap::default();
